@@ -1,9 +1,11 @@
 (ns figwheel-sidecar.utils
   (:require
-   [clojure.java.io :as io]
-   [cljs.analyzer :as ana]
-   [cljs.env]
-   [clojure.string :as string]))
+    [clojure.java.io :as io]
+    [cljs.analyzer :as ana]
+    [cljs.env]
+    [clojure.string :as string]
+    [cognitect.transit :as transit])
+  (:import (java.io ByteArrayOutputStream ByteArrayInputStream)))
 
 (def sync-agent (agent {}))
 
@@ -73,6 +75,17 @@
     (swap! env-atom #(vary-meta % assoc :type ::compiler-env))
     env-atom))
 
+(defn serialize-msg [msg]
+  (let [out (ByteArrayOutputStream. 4096)
+        writer (transit/writer out :json)]
+    (transit/write writer msg)
+    (.toString out)))
+
+(defn unserialize-msg [serialized-msg]
+  {:pre [(string? serialized-msg)]}
+  (let [in (ByteArrayInputStream. (.getBytes serialized-msg "UTF-8"))
+        reader (transit/reader in :json)]
+    (transit/read reader)))
 
 
 

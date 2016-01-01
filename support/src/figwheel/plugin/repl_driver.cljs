@@ -1,8 +1,13 @@
 (ns figwheel.plugin.repl-driver
   (:require
+    [figwheel.client.eval :as eval]
     [figwheel.client.socket :as socket]))
 
 (def subscribers (atom []))
+
+; unfortunately we don't have an easy way how to pass opts into our exported functions
+; right now, we assume there will be only one repl-driver in given figwheel instance
+(def figwheel-opts (volatile! {}))
 
 ; -- subscribers ------------------------------------------------------------------------------------------------------------
 
@@ -25,10 +30,13 @@
 
 ; -- low-level sending ------------------------------------------------------------------------------------------------------
 
-(defn send-message! [command opts]
+(defn send-message! [command & [opts]]
   (socket/send! (merge opts
                        {:figwheel-event "repl-driver"
                         :command        command})))
+
+(defn set-opts! [opts]
+  (vreset! figwheel-opts opts))
 
 ; -- API available for client use -------------------------------------------------------------------------------------------
 
@@ -49,5 +57,8 @@
                          :code       code
                          :input      (or user-input code)}))
 
+(defn ^:export eval-js [code callback-name]
+  (eval/repl-eval-javascript code @figwheel-opts callback-name))
+
 (defn ^:export request-ns []
-  (send-message! "request-ns" {}))
+  (send-message! "request-ns"))

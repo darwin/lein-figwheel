@@ -3,6 +3,7 @@
    [figwheel-sidecar.config :as config]
    [figwheel-sidecar.utils :as utils]
    [figwheel-sidecar.repl.controller :as repl-controller]
+   [figwheel-sidecar.repl.server :as repl-server]
    [figwheel-sidecar.protocols :refer [ChannelServer] :as protocols]
 
    [clojure.java.io :as io]
@@ -19,18 +20,6 @@
    [com.stuartsierra.component :as component])
   (:import [java.io ByteArrayInputStream ByteArrayOutputStream]))
 
-(defn serialize-msg [msg]
-  (let [out (ByteArrayOutputStream. 4096)
-        writer (transit/writer out :json)]
-    (transit/write writer msg)
-    (.toString out)))
-
-(defn unserialize-msg [serialized-msg]
-  {:pre [(string? serialized-msg)]}
-  (let [in (ByteArrayInputStream. (.getBytes serialized-msg "UTF-8"))
-        reader (transit/reader in :json)]
-    (transit/read reader)))
-
 (defn get-open-file-command [{:keys [open-file-command]} {:keys [file-name file-line]}]
   (when open-file-command
     (if (= open-file-command "emacsclient")
@@ -39,7 +28,7 @@
 
 (defn read-msg [data]
   (try
-    (let [msg (unserialize-msg data)]
+    (let [msg (utils/unserialize-msg data)]
       (if (and (map? msg) (:figwheel-event msg)) msg {}))
     (catch Exception e
       (println "Figwheel: message from client couldn't be read!")
@@ -95,7 +84,7 @@
                      (= desired-build-id (:build-id msg))))
            (<!! (timeout compile-wait-time))
            (when (open? wschannel)
-             (send! wschannel (serialize-msg msg)))))))
+             (send! wschannel (utils/serialize-msg msg)))))))
     
     (on-close wschannel
               (fn [status]
@@ -113,7 +102,7 @@
       (when (open? wschannel)
         (let [msg {:msg-name   :ping
                    :project-id (:unique-id server-state)}]
-          (send! wschannel (serialize-msg msg)))
+          (send! wschannel (utils/serialize-msg msg)))
         (recur)))))
 
 (defn reload-handler [server-state]
@@ -128,7 +117,8 @@
   (try
     (-> (routes
          (GET "/figwheel-ws/:desired-build-id" {params :params} (reload-handler server-state))
-         (GET "/figwheel-ws" {params :params} (reload-handler server-state))       
+         (GET "/figwheel-ws" {params :params} (reload-handler server-state))
+         (GET "/repl-driver-ws/:id" {params :params} (repl-server/new-client-connection-handler server-state))
          (route/resources "/" {:root http-server-root})
          (or resolved-ring-handler (fn [r] false))
          (GET "/" [] (resource-response "index.html" {:root http-server-root}))

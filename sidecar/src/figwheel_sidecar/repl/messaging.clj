@@ -1,13 +1,27 @@
 (ns figwheel-sidecar.repl.messaging
   (:require
-    [figwheel-sidecar.protocols :as protocols]))
+    [clojure.core.async :refer [chan <!! put! alts!! timeout close! go go-loop]]
+    [figwheel-sidecar.protocols :as protocols]
+    [figwheel-sidecar.repl.server :as server]))
 
-(defn send-message [figwheel-server command & [payload]]
-  (protocols/-send-message figwheel-server
-                           (:build-id figwheel-server)
-                           (merge payload {:msg-name :repl-driver
-                                           :command  command})
-                           nil))
+(def message-timeout-value
+  {:status     :exception
+   :value      "Eval timed out!"
+   :stacktrace "No stacktrace available."})
+
+(defn send-message [figwheel-server command & [payload callback]]
+  (let [driver-payload {:msg-name :repl-driver
+                        :command  command}
+        effective-payload (merge payload driver-payload)]
+    (protocols/-send-message figwheel-server (:build-id figwheel-server) effective-payload callback)))
+
+(defn send-message-with-answer [figwheel-server command payload]
+  (let [result-chan (chan)
+        timeout-chan (timeout 8000)
+        receiver (fn [result] (put! result-chan result))]
+    (send-message figwheel-server command payload receiver)
+    (let [[value] (alts!! [result-chan timeout-chan])]
+      (or value message-timeout-value))))                                                                                     ; note: timeout-chan just closes with nil value
 
 ; -- messages ---------------------------------------------------------------------------------------------------------------
 
@@ -25,3 +39,12 @@
   (send-message figwheel-server :output {:request-id request-id
                                          :kind       kind
                                          :content    content}))
+
+(defn eval-js [figwheel-server request-id js-code]
+  {:pre [(string? js-code)]}
+  (let [payload {:msg-name   :repl-driver
+                 :command    :eval-js
+                 :request-id request-id
+                 :code       js-code}]
+    (server/ask-client-to-deliver-figwheel-message! request-id payload)
+    (send-message-with-answer figwheel-server :eval-js payload)))

@@ -83,13 +83,13 @@
     (add-repl-print-callback! figwheel-server)
     (wait-for-connection figwheel-server)
     (Thread/sleep 500)) ;; just to help with setup latencies
-  (-evaluate [_ _ _ js]
+  (-evaluate [this _ _ js]
     (wait-for-connection figwheel-server)
-    (eval-js figwheel-server js))
+    ((:eval-js this) figwheel-server js))
       ;; this is not used for figwheel
   (-load [this ns url]
     (wait-for-connection figwheel-server)
-    (eval-js figwheel-server (slurp url)))
+    ((:eval-js this) figwheel-server (slurp url)))
   (-tear-down [_] true)
   cljs.repl/IParseStacktrace
   (-parse-stacktrace [repl-env stacktrace error build-options]
@@ -104,12 +104,12 @@
             (filter valid-stack-line? (cljs.repl/mapped-stacktrace stacktrace build-options))]
       (repl-println "\t" (str function " (" (str (or url file)) ":" line ":" column ")")))))
 
-(defn repl-env
+(defn prepare-repl-env
   ([figwheel-server {:keys [id build-options] :as build}]
    (assoc (FigwheelEnv. (merge figwheel-server
                                (if id {:build-id id} {})
                                (select-keys build-options [:output-dir :output-to])))
-          :cljs.env/compiler (:compiler-env build)))
+     :cljs.env/compiler (:compiler-env build)))
   ([figwheel-server]
    (FigwheelEnv. figwheel-server)))
 
@@ -152,17 +152,12 @@
   ([build figwheel-server]
    (repl build figwheel-server {}))
   ([build figwheel-server opts]
-   (let [opts (merge (assoc (or (:compiler build) (:build-options build))
-                            :warn-on-undeclared true)
-                     opts)
-         figwheel-repl-env (repl-env figwheel-server build)
-         repl-opts (assoc opts :compiler-env (:compiler-env build))
-         protocol (if (in-nrepl-env?)
-                    :nrepl
-                    :default)
-         start-fn (fn [updated-repl-opts]
-                    (start-cljs-repl protocol figwheel-repl-env updated-repl-opts))]
-     (driver/start-repl-with-driver build figwheel-server repl-opts start-fn))))
+   (let [compiler-opts (assoc (or (:compiler build) (:build-options build)) :warn-on-undeclared true)
+         effective-opts (merge compiler-opts opts)
+         repl-opts (assoc effective-opts :compiler-env (:compiler-env build))
+         repl-env (prepare-repl-env figwheel-server build)
+         repl-protocol (if (in-nrepl-env?) :nrepl :default)]
+     (driver/start-repl-with-driver build figwheel-server repl-protocol repl-env repl-opts eval-js start-cljs-repl))))
 
 ;; deprecated 
 (defn get-project-cljs-builds []

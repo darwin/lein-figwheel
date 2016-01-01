@@ -2,7 +2,8 @@
   (:require
    [cljs.core.async :refer [put! chan <! map< close! timeout alts!] :as async]
    [figwheel.client.socket :as socket]
-   [figwheel.client.utils :as utils]   
+   [figwheel.client.utils :as utils]
+   [figwheel.client.eval :as eval]
    [figwheel.client.heads-up :as heads-up]
    [figwheel.client.file-reloading :as reloading]
    [figwheel.plugin.repl-driver :as repl-driver]
@@ -13,12 +14,6 @@
   (:import [goog]))
 
 ;; exception formatting
-
-(defn figwheel-repl-print [args]
-  (socket/send! {:figwheel-event "callback"
-                 :callback-name "figwheel-repl-print"
-                 :content args})
-  args)
 
 (def autoload?
   (if (utils/html-env?)
@@ -33,20 +28,6 @@
     (.setItem js/localStorage "figwheel_autoload" (not (autoload?)))
     (utils/log :info
                (str "Figwheel autoloading " (if (autoload?) "ON" "OFF")))))
-
-(defn console-print [args]
-  (.apply (.-log js/console) js/console (into-array args))
-  args)
-
-(defn repl-print-fn [& args]
-  (-> args
-      console-print
-      figwheel-repl-print)
-  nil)
-
-(defn enable-repl-print! []
-  (set! *print-newline* false)
-  (set! *print-fn* repl-print-fn))
 
 (defn get-essential-messages [ed]
   (when ed
@@ -123,19 +104,15 @@
    (error-test3))
 
 (defn repl-driver-plugin [{:keys [build-id] :as opts}]
+  (repl-driver/set-opts! opts)
   (fn [[msg & _]]
     (when (= :repl-driver (:msg-name msg))
       (repl-driver/handle-message msg opts))))
 
-(defn repl-plugin [{:keys [build-id] :as opts}]
+(defn repl-plugin [opts]
   (fn [[{:keys [msg-name] :as msg} & _]]
     (when (= :repl-eval msg-name)
-      (utils/ensure-cljs-user)
-      (utils/eval-javascript** (:code msg) repl-print-fn opts
-                         (fn [res]
-                           (socket/send! {:figwheel-event "callback"
-                                          :callback-name (:callback-name  msg)
-                                          :content res}))))))
+      (eval/repl-eval-javascript (:code msg) opts (:callback-name msg)))))
 
 (defn css-reloader-plugin [opts]
   (fn [[{:keys [msg-name] :as msg} & _]]
@@ -320,7 +297,7 @@
                             plugins'
                             (merge (base-plugins system-options) merge-plugins))]
              (set! utils/*print-debug* (:debug opts))
-             #_(enable-repl-print!)         
+             #_(eval/enable-repl-print!)
              (add-plugins plugins system-options)
              (reloading/patch-goog-base)
              (socket/open system-options))))))

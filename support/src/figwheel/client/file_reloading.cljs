@@ -1,14 +1,15 @@
 (ns figwheel.client.file-reloading
   (:require
-   [figwheel.client.utils :as utils :refer-macros [dev-assert]]
-   [goog.Uri :as guri]
-   [goog.string]
-   [goog.object :as gobj]   
-   [goog.net.jsloader :as loader]
-   [goog.string :as gstring]
-   [clojure.string :as string]
-   [clojure.set :refer [difference]]
-   [cljs.core.async :refer [put! chan <! map< close! timeout alts!] :as async])
+    [figwheel.client.utils :as utils :refer-macros [dev-assert]]
+    [goog.Uri :as guri]
+    [goog.string]
+    [goog.object :as gobj]
+    [goog.net.jsloader :as loader]
+    [goog.string :as gstring]
+    [clojure.string :as string]
+    [clojure.set :refer [difference]]
+    [cljs.core.async :refer [put! chan <! map< close! timeout alts!] :as async]
+    [figwheel.client.eval :as eval])
   (:require-macros
    [cljs.core.async.macros :refer [go go-loop]])
   (:import [goog]))
@@ -335,7 +336,7 @@
     (let [code eval-body]
       (try
         (utils/debug-prn (str "Evaling file " file))
-        (utils/eval-helper code opts)
+        (eval/eval-helper code opts)
         (catch :default e
           (utils/log :error (str "Unable to evaluate " file)))))))
 

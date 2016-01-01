@@ -294,20 +294,35 @@
               (unsuppress-recording-until-flush driver sniffer-key)
               (messaging/report-output (:server driver) request-id sniffer-key content))))))))
 
+; -- javascript eval --------------------------------------------------------------------------------------------------------
+
+(defn eval-js-via-repl-driver [figwheel-server job js-code]
+  (messaging/eval-js figwheel-server (:request-id job) js-code))
+
+(defn custom-eval-js-factory
+  "Produces javascript evaluation function for given driver.
+  We want to send evaluation to repl-driver when external job is in-flight.
+  Otherwise we want to evaluate it the standard way."
+  [driver standard-eval-js]
+  (fn [figwheel-server js-code]
+    (if-let [job (get-current-job driver)]
+      (eval-js-via-repl-driver figwheel-server job js-code)
+      (standard-eval-js figwheel-server js-code))))
 
 ; -- initialization ---------------------------------------------------------------------------------------------------------
 
-(defn start-repl-with-driver [build figwheel-server opts start-fn]
+(defn start-repl-with-driver [build figwheel-server repl-protocol repl-env repl-opts eval-js start-fn]
   (let [driver (make-driver {:build    build
                              :server   figwheel-server
                              :sniffers {:stdout (volatile! nil)
                                         :stderr (volatile! nil)}})
-        repl-opts (assoc opts
-                    :read (multiplexing-reader-factory driver)
-                    :eval (custom-eval-factory driver)
-                    :prompt (custom-prompt-factory driver)
-                    :caught (custom-caught-factory driver)
-                    :bind-err false)]
+        updated-repl-opts (assoc repl-opts
+                            :read (multiplexing-reader-factory driver)
+                            :eval (custom-eval-factory driver)
+                            :prompt (custom-prompt-factory driver)
+                            :caught (custom-caught-factory driver)
+                            :bind-err false)
+        updated-repl-env (assoc repl-env :eval-js (custom-eval-js-factory driver eval-js))]
     (let [stdout-sniffer (sniffer/make-sniffer *out* (partial flush-handler driver :stdout))
           stderr-sniffer (sniffer/make-sniffer *out* (partial flush-handler driver :stderr))]                                 ; *out* is here on purpose, see :bind-err and its effect when true (default)
       (try
@@ -316,7 +331,7 @@
         (registry/register-driver! :current-repl driver)
         (binding [*out* stdout-sniffer
                   *err* stderr-sniffer]
-          (start-fn repl-opts))
+          (start-fn repl-protocol updated-repl-env updated-repl-opts))
         (finally
           (sniffer/destroy-sniffer stdout-sniffer)
           (sniffer/destroy-sniffer stderr-sniffer))))))
